@@ -27,7 +27,10 @@ blake2b_simd = "0.5.10"
 log = "0.4.8"
 async-std = "1.6.0"
 key_management = { path = "../../key_management"}
+base64 = { version = "0.12.1", optional = true }
 
 [dev-dependencies]
 interpreter = { path = "../../vm/interpreter/" }
-key_management = { path = "../../key_management"}
+
+[features]
+json = ["base64", "crypto/json"]

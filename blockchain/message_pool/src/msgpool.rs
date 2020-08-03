@@ -12,7 +12,7 @@ use cid::multihash::Blake2b256;
 use cid::Cid;
 use crypto::{Signature, SignatureType};
 use encoding::Cbor;
-use flo_stream::Subscriber;
+use flo_stream::{Subscriber, Publisher, MessagePublisher};
 use futures::StreamExt;
 use log::{error, warn};
 use lru::LruCache;
@@ -70,6 +70,63 @@ impl MsgSet {
     }
 }
 
+
+// TODO need to implement json serialization for this struct
+#[derive(Clone)]
+pub struct MpSubChange {
+    pub change_type: u8, // add: 0, remove: 1
+    pub message: SignedMessage
+}
+
+#[cfg(feature = "json")]
+pub mod json {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// Wrapper for serializing and deserializing a SignedMessage from JSON.
+    #[derive(Deserialize, Serialize)]
+    #[serde(transparent)]
+    pub struct MpSubChangeJson(#[serde(with = "self")] pub MpSubChange);
+
+    /// Wrapper for serializing a SignedMessage reference to JSON.
+    #[derive(Serialize)]
+    #[serde(transparent)]
+    pub struct MpSubJsonChangeRef<'a>(#[serde(with = "self")] pub &'a MpSubChange);
+
+    #[derive(Serialize, Deserialize)]
+    struct JsonHelper {
+        #[serde(rename = "Type")]
+        change_type: u8,
+        #[serde(rename = "Message")]
+        message: SignedMessage,
+    }
+
+    pub fn serialize<S>(c: &MpSubChange, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+    {
+        JsonHelper {
+            change_type: c.change_type,
+            message: c.message.clone(),
+        }
+            .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<MpSubChange, D::Error>
+        where
+            D: Deserializer<'de>,
+    {
+        let JsonHelper {
+            change_type,
+            message,
+        } = Deserialize::deserialize(deserializer)?;
+        Ok(MpSubChange {
+            change_type,
+            message,
+        })
+    }
+}
+
 /// Provider Trait. This trait will be used by the messagepool to interact with some medium in order to do
 /// the operations that are listed below that are required for the messagepool.
 pub trait Provider {
@@ -91,12 +148,17 @@ pub trait Provider {
     fn messages_for_tipset(&self, h: &Tipset) -> Result<Vec<UnsignedMessage>, Error>;
     /// Return a tipset given the tipset keys from the ChainStore
     fn load_tipset(&self, tsk: &TipsetKeys) -> Result<Tipset, Error>;
+    /// publish a SignedMessage
+    fn publish(&mut self, change: MpSubChange);
+    /// subscribe to Provider publisher
+    fn subscribe(&mut self) -> Subscriber<Arc<MpSubChange>>;
 }
 
 /// This is the mpool provider struct that will let us access and add messages to messagepool.
 /// future
 pub struct MpoolProvider<DB> {
     cs: ChainStore<DB>,
+    publisher: Publisher<Arc<MpSubChange>>
 }
 
 impl<'db, DB> MpoolProvider<DB>
@@ -107,7 +169,7 @@ where
     where
         DB: BlockStore,
     {
-        MpoolProvider { cs }
+        MpoolProvider { cs, publisher: Publisher::new(20) }
     }
 }
 
@@ -154,12 +216,23 @@ where
     fn load_tipset(&self, tsk: &TipsetKeys) -> Result<Tipset, Error> {
         self.cs.tipset_from_keys(tsk).map_err(|err| err.into())
     }
+
+    fn publish(&mut self, change: MpSubChange) {
+        task::block_on( async {
+            self.publisher.publish(Arc::new(change)).await;
+        })
+    }
+
+    fn subscribe(&mut self) -> Subscriber<Arc<MpSubChange>> {
+        self.publisher.subscribe()
+    }
 }
 
 /// This is the Provider implementation that will be used for the mpool RPC
 pub struct MpoolRpcProvider<DB> {
     subscriber: Subscriber<HeadChange>,
     db: Arc<DB>,
+    publisher: Publisher<Arc<MpSubChange>>
 }
 
 impl<DB> MpoolRpcProvider<DB>
@@ -170,7 +243,7 @@ where
     where
         DB: BlockStore,
     {
-        MpoolRpcProvider { subscriber, db }
+        MpoolRpcProvider { subscriber, db, publisher: Publisher::new(20) }
     }
 }
 
@@ -218,6 +291,16 @@ where
     fn load_tipset(&self, tsk: &TipsetKeys) -> Result<Tipset, Error> {
         let ts = chain::tipset_from_keys(self.db.as_ref(), tsk)?;
         Ok(ts)
+    }
+
+    fn publish(&mut self, change: MpSubChange) {
+        task::block_on(async move {
+            self.publisher.publish(Arc::new(change)).await
+        })
+    }
+
+    fn subscribe(&mut self) -> Subscriber<Arc<MpSubChange>> {
+        self.publisher.subscribe()
     }
 }
 
@@ -442,7 +525,7 @@ where
 
     /// Remove a message given a sequence and address from the messagepool
     pub async fn remove(&mut self, from: &Address, sequence: u64) -> Result<(), Error> {
-        remove(from, self.pending.as_ref(), sequence).await
+        remove(from, self.api.as_ref(), self.pending.as_ref(), sequence).await
     }
 
     /// Return a tuple that contains a vector of all signed messages and the current tipset for
@@ -542,20 +625,31 @@ where
 
         Ok(())
     }
+
+    pub async fn sub(&self) -> Subscriber<Arc<MpSubChange>> {
+        self.api.write().await.subscribe()
+    }
 }
 
 /// Remove a message from pending given the from address and sequence
-pub async fn remove(
+pub async fn remove<T>(
     from: &Address,
+    api: &RwLock<T>,
     pending: &RwLock<HashMap<Address, MsgSet>>,
     sequence: u64,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+T: Provider
+{
     let mut pending = pending.write().await;
 
     let mset = pending
         .get_mut(from)
         .ok_or_else(|| Error::InvalidFromAddr)?;
+    let m = mset.msgs.get(&sequence).ok_or_else(|| Error::Other("No message for sequence".to_string()))?.clone();
     mset.msgs.remove(&sequence);
+
+    api.write().await.publish( MpSubChange{ change_type: 1, message: m });
 
     if mset.msgs.is_empty() {
         pending.remove(from);
@@ -598,6 +692,7 @@ async fn add_helper<T>(
 where
     T: Provider,
 {
+    let smsg = msg.clone();
     if msg.signature().signature_type() == SignatureType::BLS {
         bls_sig_cache
             .write()
@@ -624,7 +719,7 @@ where
             pending.insert(from, mset);
         }
     }
-
+    api.write().await.publish(MpSubChange{ change_type: 0, message: smsg });
     Ok(())
 }
 
@@ -667,10 +762,10 @@ where
             let (msgs, smsgs) = api.read().await.messages_for_block(b)?;
 
             for msg in smsgs {
-                rm(msg.from(), pending, msg.sequence(), rmsgs.borrow_mut()).await?;
+                rm(msg.from(), api, pending, msg.sequence(), rmsgs.borrow_mut()).await?;
             }
             for msg in msgs {
-                rm(msg.from(), pending, msg.sequence(), rmsgs.borrow_mut()).await?;
+                rm(msg.from(), api, pending, msg.sequence(), rmsgs.borrow_mut()).await?;
             }
         }
         *cur_tipset.write().await = ts;
@@ -678,7 +773,7 @@ where
     for (_, hm) in rmsgs {
         for (_, msg) in hm {
             if let Err(e) = add_helper(api, bls_sig_cache, pending, msg).await {
-                error!("Failed to readd message from reorg to mpool: {}", e);
+                error!("Failed to read message from reorg to mpool: {}", e);
             }
         }
     }
@@ -687,19 +782,23 @@ where
 
 /// This is a helper method for head_change. This method will remove a sequence for a from address
 /// from the rmsgs hashmap. Also remove the from address and sequence from the mmessagepool.
-async fn rm(
+async fn rm<T>(
     from: &Address,
+    api: &RwLock<T>,
     pending: &RwLock<HashMap<Address, MsgSet>>,
     sequence: u64,
     rmsgs: &mut HashMap<Address, HashMap<u64, SignedMessage>>,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+T: Provider
+{
     if let Some(temp) = rmsgs.get_mut(from) {
         if temp.get_mut(&sequence).is_some() {
             temp.remove(&sequence);
         }
-        remove(from, pending, sequence).await?;
+        remove(from, api, pending, sequence).await?;
     } else {
-        remove(from, pending, sequence).await?;
+        remove(from, api, pending, sequence).await?;
     }
     Ok(())
 }
@@ -731,6 +830,7 @@ pub mod test_provider {
         state_sequence: HashMap<Address, u64>,
         tipsets: Vec<Tipset>,
         publisher: Publisher<HeadChange>,
+        api_publisher: Publisher<Arc<MpSubChange>>
     }
 
     impl Default for TestApi {
@@ -741,6 +841,7 @@ pub mod test_provider {
                 state_sequence: HashMap::new(),
                 tipsets: Vec::new(),
                 publisher: Publisher::new(1),
+                api_publisher: Publisher::new(1),
             }
         }
     }
@@ -827,6 +928,16 @@ pub mod test_provider {
                 }
             }
             Err(Errors::InvalidToAddr)
+        }
+
+        fn publish(&mut self, change: MpSubChange) {
+            task::block_on(async move {
+                self.api_publisher.publish(Arc::new(change))
+            });
+        }
+
+        fn subscribe(&mut self) -> Subscriber<Arc<MpSubChange>> {
+            self.api_publisher.subscribe()
         }
     }
 

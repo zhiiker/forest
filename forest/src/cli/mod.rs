@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0, MIT
 
 mod chain_cmd;
+mod mpool_cmd;
 mod config;
 mod fetch_params_cmd;
 mod genesis;
 
 pub(super) use self::chain_cmd::ChainCommands;
+pub(super) use self::mpool_cmd::MpoolCommands;
 pub use self::config::Config;
 pub(super) use self::fetch_params_cmd::FetchCommands;
 pub(super) use self::genesis::initialize_genesis;
@@ -47,6 +49,9 @@ pub enum Subcommand {
 
     #[structopt(name = "chain", about = "Interact with Filecoin blockchain")]
     Chain(ChainCommands),
+
+    #[structopt(name = "mpool", about = "Interact with Filecoin MessagePool")]
+    Mpool(MpoolCommands),
 }
 
 /// Daemon process command line options.

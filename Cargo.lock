@@ -4312,6 +4312,7 @@ name = "message_pool"
 version = "0.1.0"
 dependencies = [
  "async-std",
+ "base64 0.12.3",
  "blake2b_simd",
  "chain",
  "db",
@@ -5603,6 +5604,7 @@ dependencies = [
  "chain_sync",
  "clock",
  "db",
+ "flo_stream",
  "forest_address",
  "forest_bigint",
  "forest_blocks",
@@ -5631,14 +5633,18 @@ dependencies = [
 name = "rpc-client"
 version = "0.1.0"
 dependencies = [
+ "forest_address",
  "forest_blocks",
  "forest_cid",
  "forest_crypto",
+ "forest_json_utils",
  "forest_message",
  "jsonrpc-v2",
  "jsonrpsee",
  "key_management",
  "log",
+ "message_pool",
+ "serde",
  "serde_json",
 ]
 

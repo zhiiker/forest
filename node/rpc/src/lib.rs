@@ -81,6 +81,7 @@ where
         .with_method("Filecoin.MpoolPending", mpool_pending::<DB, KS>)
         .with_method("Filecoin.MpoolPush", mpool_push::<DB, KS>)
         .with_method("Filecoin.MpoolPushMessage", mpool_push_message::<DB, KS>)
+        .with_method("Filecoin.MpoolSub", mpool_sub::<DB, KS>)
         // Sync API
         .with_method("Filecoin.SyncCheckBad", sync_check_bad::<DB, KS>)
         .with_method("Filecoin.SyncMarkBad", sync_mark_bad::<DB, KS>)

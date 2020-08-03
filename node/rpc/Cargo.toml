@@ -17,7 +17,7 @@ blocks = { package = "forest_blocks", path = "../../blockchain/blocks", features
 clock = { path = "../clock" }
 message = { package = "forest_message", path = "../../vm/message", features = ["json"] }
 jsonrpc-v2 = { version = "0.5.2", features = ["easy-errors", "macros"] }
-message_pool = { path = "../../blockchain/message_pool" }
+message_pool = { path = "../../blockchain/message_pool", features = ["json"] }
 crypto = { package = "forest_crypto", path = "../../crypto", features = ["json"] }
 num-traits = "0.2.11"
 wallet = {package = "key_management", path = "../../key_management", features = ["json"] }
@@ -28,6 +28,8 @@ num-bigint = { path = "../../utils/bigint", package = "forest_bigint" }
 thiserror = "1.0"
 state_tree = { path = "../../vm/state_tree" }
 forest_libp2p = { path = "../forest_libp2p" }
+flo_stream = "0.4.0"
+futures = "0.3.5"
 
 [dev-dependencies]
 db = { path = "../db" }

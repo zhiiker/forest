@@ -12,5 +12,8 @@ pub(super) async fn process(command: Subcommand) {
         Subcommand::Chain(cmd) => {
             cmd.run().await;
         }
+        Subcommand::Mpool(cmd) => {
+            cmd.run().await;
+        }
     }
 }

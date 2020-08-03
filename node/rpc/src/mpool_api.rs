@@ -17,6 +17,8 @@ use message::{
 use std::collections::HashSet;
 use std::str::FromStr;
 use wallet::KeyStore;
+use futures::StreamExt;
+use message_pool::json::MpSubChangeJson;
 
 /// Estimate the gas price for an Address
 pub(crate) async fn mpool_estimate_gas_price<DB, KS>(
@@ -151,4 +153,21 @@ where
     data.mpool.as_ref().push(smsg.clone()).await?;
 
     Ok(SignedMessageJson(smsg))
+}
+
+
+/// Return MessagePool Update
+pub(crate) async fn mpool_sub<DB, KS>(
+    data: Data<RpcState<DB, KS>>,
+) -> Result<MpSubChangeJson, JsonRpcError>
+where
+    DB: BlockStore + Send + Sync + 'static,
+    KS: KeyStore + Send + Sync + 'static,
+{
+    let mut sub = data.mpool.as_ref().sub().await;
+    loop {
+        if let Some(sub_data) = sub.next().await {
+            return Ok(MpSubChangeJson((*sub_data).clone()))
+        }
+    }
 }

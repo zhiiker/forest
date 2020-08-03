@@ -8,7 +8,9 @@ use blocks::{header::json::BlockHeaderJson, tipset_json::TipsetJson};
 use cid::json::CidJson;
 use jsonrpsee::raw::RawClient;
 use jsonrpsee::transport::http::HttpTransportClient;
-use message::unsigned_message::json::UnsignedMessageJson;
+use message::{unsigned_message::json::UnsignedMessageJson, signed_message::json::SignedMessageJson};
+use cid::json::vec::CidJsonVec;
+use message_pool::json::MpSubChangeJson;
 
 jsonrpsee::rpc_api! {
     pub Filecoin {
@@ -27,6 +29,16 @@ jsonrpsee::rpc_api! {
 
         #[rpc(method = "Filecoin.ChainGetObj", positional_params)]
         fn chain_read_obj(cid: CidJson) -> Vec<u8>;
+
+        #[rpc(method = "Filecoin.WalletList")]
+        fn wallet_list() -> Vec<String>;
+
+        /// Mpool
+        #[rpc(method = "Filecoin.MpoolPending", positional_params)]
+        fn mpool_pending(cids: CidJsonVec) -> Vec<SignedMessageJson>;
+
+        #[rpc(method = "Filecoin.MpoolSub")]
+        fn mpool_sub() -> MpSubChangeJson;
     }
 }
 
