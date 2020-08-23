@@ -15,5 +15,8 @@ pub(super) async fn process(command: Subcommand) {
         Subcommand::Genesis(cmd) => {
             cmd.run().await;
         }
+        Subcommand::State(cmd) => {
+            cmd.run().await;
+        }
     }
 }

@@ -6,12 +6,15 @@ mod config;
 mod fetch_params_cmd;
 mod genesis;
 mod genesis_cmd;
+mod state_cmd;
 
 pub(super) use self::chain_cmd::ChainCommands;
 pub use self::config::Config;
 pub(super) use self::fetch_params_cmd::FetchCommands;
 pub(super) use self::genesis::initialize_genesis;
 pub(super) use self::genesis_cmd::GenesisCommands;
+pub(super) use self::state_cmd::StateCommands;
+
 
 use jsonrpc_v2::Error as JsonRpcError;
 use std::cell::RefCell;
@@ -52,6 +55,9 @@ pub enum Subcommand {
 
     #[structopt(name = "genesis", about = "Work with blockchain genesis")]
     Genesis(GenesisCommands),
+
+    #[structopt(name = "state", about = "Interact with and query filecoin chain state")]
+    State(StateCommands),
 }
 
 /// Daemon process command line options.
