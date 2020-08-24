@@ -4,13 +4,13 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
 pub struct StateCommands {
     #[structopt(subcommand)]
-    pub subcommand : Subcommands,
+    pub subcommand : StateSubcommands,
     #[structopt(short,    about =  "Specify tipset to call method on (pass comma separated array of cids)")]
     pub tipset_value: String,
 }
 
 #[derive(Debug, StructOpt)]
-pub enum Subcommands {
+pub enum StateSubcommands {
     #[structopt( name = "power", about =  "Query network or miner power")]
     Power{
         miner_addr : Option<String>
@@ -100,18 +100,29 @@ pub enum Subcommands {
     #[structopt(name = "market" , about =   "Inspect the storage market actor")]
     Market {
         #[structopt(subcommand)]
-        market_commands:  MarketCommands
+        market_commands:  MarketSubCommands
     } ,
 }
 
 #[derive(Debug, StructOpt)]
-pub enum MarketCommands {
+pub enum MarketSubCommands {
     #[structopt(name = "balance" , about =   "Get the market balance (locked and escrowed) for a given account")]
     Balance,
 }
 
 impl StateCommands {
     pub async fn run(&self) {
+
+        match self {
+
+            StateSubcommands::MinerInfo{miner_addr} => {
+
+            },
+
+            _ => {
+                unimplemented!();
+            },
+        }
 
     }
 }
