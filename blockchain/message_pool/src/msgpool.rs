@@ -52,16 +52,16 @@ impl MsgSet {
         }
         if let Some(exms) = self.msgs.get(&m.sequence()) {
             if m.cid()? != exms.cid()? {
-                let gas_price = exms.message().gas_price();
+                let premium = exms.message().gas_premium();
                 let rbf_num = BigInt::from(RBF_NUM);
                 let rbf_denom = BigInt::from(RBF_DENOM);
-                let min_price = gas_price.clone() + ((gas_price * &rbf_num) / rbf_denom) + 1u8;
-                if m.message().gas_price() <= &min_price {
-                    warn!("mesage gas price is below min gas price");
+                let min_price = premium + ((premium * &rbf_num) / rbf_denom) + 1u8;
+                if m.message().gas_premium() <= &min_price {
+                    warn!("message gas price is below min gas price");
                     return Err(Error::GasPriceTooLow);
                 }
             } else {
-                warn!("try to add message with duplicate sequence");
+                warn!("try to add message with duplicate sequence increase gas premium");
                 return Err(Error::DuplicateSequence);
             }
         }
@@ -152,6 +152,8 @@ pub trait Provider {
     fn publish(&mut self, change: MpSubChange);
     /// subscribe to Provider publisher
     fn subscribe(&mut self) -> Subscriber<Arc<MpSubChange>>;
+    /// Computes the base fee
+    fn chain_compute_base_fee(&self, ts: &Tipset) -> Result<BigInt, Error>;
 }
 
 /// This is the mpool provider struct that will let us access and add messages to messagepool.
@@ -197,8 +199,10 @@ where
 
     fn state_get_actor(&self, addr: &Address, ts: &Tipset) -> Result<ActorState, Error> {
         let state = StateTree::new_from_root(self.cs.db.as_ref(), ts.parent_state())
-            .map_err(Error::Other)?;
-        let actor = state.get_actor(addr).map_err(Error::Other)?;
+            .map_err(|e| Error::Other(e.to_string()))?;
+        let actor = state
+            .get_actor(addr)
+            .map_err(|e| Error::Other(e.to_string()))?;
         actor.ok_or_else(|| Error::Other("No actor state".to_owned()))
     }
 
@@ -225,6 +229,10 @@ where
 
     fn subscribe(&mut self) -> Subscriber<Arc<MpSubChange>> {
         self.publisher.subscribe()
+    }
+
+    fn chain_compute_base_fee(&self, ts: &Tipset) -> Result<BigInt, Error> {
+        chain::compute_base_fee(self.cs.blockstore(), ts).map_err(|err| err.into())
     }
 }
 
@@ -271,9 +279,11 @@ where
     }
 
     fn state_get_actor(&self, addr: &Address, ts: &Tipset) -> Result<ActorState, Error> {
-        let state =
-            StateTree::new_from_root(self.db.as_ref(), ts.parent_state()).map_err(Error::Other)?;
-        let actor = state.get_actor(addr).map_err(Error::Other)?;
+        let state = StateTree::new_from_root(self.db.as_ref(), ts.parent_state())
+            .map_err(|e| Error::Other(e.to_string()))?;
+        let actor = state
+            .get_actor(addr)
+            .map_err(|e| Error::Other(e.to_string()))?;
         actor.ok_or_else(|| Error::Other("No actor state".to_owned()))
     }
 
@@ -301,6 +311,10 @@ where
 
     fn subscribe(&mut self) -> Subscriber<Arc<MpSubChange>> {
         self.publisher.subscribe()
+    }
+
+    fn chain_compute_base_fee(&self, ts: &Tipset) -> Result<BigInt, Error> {
+        chain::compute_base_fee(self.db.as_ref(), ts).map_err(|err| err.into())
     }
 }
 
@@ -551,7 +565,7 @@ where
 
     /// Return a Vector of signed messages for a given from address. This vector will be sorted by
     /// each messsage's sequence. If no corresponding messages found, return None result type
-    async fn pending_for(&self, a: &Address) -> Option<Vec<SignedMessage>> {
+    pub async fn pending_for(&self, a: &Address) -> Option<Vec<SignedMessage>> {
         let pending = self.pending.read().await;
         let mset = pending.get(a)?;
         if mset.msgs.is_empty() {
@@ -587,7 +601,7 @@ where
 
     /// Return gas price estimate this has been translated from lotus, a more smart implementation will
     /// most likely need to be implemented
-    pub fn estimate_gas_price(
+    pub fn estimate_gas_premium(
         &self,
         nblocksincl: u64,
         _sender: Address,
@@ -595,6 +609,7 @@ where
         _tsk: TipsetKeys,
     ) -> Result<BigInt, Error> {
         // TODO possibly come up with a smarter way to estimate the gas price
+        // TODO a smarter way exists now
         let min_gas_price = 0;
         match nblocksincl {
             0 => Ok(BigInt::from(min_gas_price + 2)),
@@ -822,7 +837,6 @@ pub mod test_provider {
     use cid::Cid;
     use flo_stream::{MessagePublisher, Publisher, Subscriber};
     use message::{SignedMessage, UnsignedMessage};
-    use num_bigint::BigUint;
 
     /// Struct used for creating a provider when writing tests involving message pool
     pub struct TestApi {
@@ -939,11 +953,15 @@ pub mod test_provider {
         fn subscribe(&mut self) -> Subscriber<Arc<MpSubChange>> {
             self.api_publisher.subscribe()
         }
+
+        fn chain_compute_base_fee(&self, _ts: &Tipset) -> Result<BigInt, Error> {
+            Ok(100.into())
+        }
     }
 
     pub fn create_header(weight: u64, parent_bz: &[u8], cached_bytes: &[u8]) -> BlockHeader {
         BlockHeader::builder()
-            .weight(BigUint::from(weight))
+            .weight(BigInt::from(weight))
             .cached_bytes(cached_bytes.to_vec())
             .cached_cid(Cid::new_from_cbor(parent_bz, Blake2b256))
             .miner_address(Address::new_id(0))
@@ -964,7 +982,7 @@ pub mod tests {
     use crypto::{election_proof::ElectionProof, SignatureType, VRFProof};
     use key_management::{MemKeyStore, Wallet};
     use message::{SignedMessage, UnsignedMessage};
-    use num_bigint::BigUint;
+    use num_bigint::BigInt;
     use std::borrow::BorrowMut;
     use std::convert::TryFrom;
     use std::thread::sleep;
@@ -995,9 +1013,10 @@ pub mod tests {
         let fmt_str = format!("===={}=====", ticket_sequence);
         let ticket = Ticket::new(VRFProof::new(fmt_str.clone().into_bytes()));
         let election_proof = ElectionProof {
+            win_count: 0,
             vrfproof: VRFProof::new(fmt_str.into_bytes()),
         };
-        let weight_inc = BigUint::from(weight);
+        let weight_inc = BigInt::from(weight);
         BlockHeader::builder()
             .miner_address(addr)
             .election_proof(Some(election_proof))
@@ -1017,11 +1036,12 @@ pub mod tests {
 
         let height = parents.epoch() + 1;
 
-        let mut weight_inc = BigUint::from(weight);
+        let mut weight_inc = BigInt::from(weight);
         weight_inc = parents.blocks()[0].weight() + weight_inc;
         let fmt_str = format!("===={}=====", ticket_sequence);
         let ticket = Ticket::new(VRFProof::new(fmt_str.clone().into_bytes()));
         let election_proof = ElectionProof {
+            win_count: 0,
             vrfproof: VRFProof::new(fmt_str.into_bytes()),
         };
         BlockHeader::builder()

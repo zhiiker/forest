@@ -31,22 +31,21 @@ where
     let (addr_str,) = params;
     let address = Address::from_str(&addr_str)?;
 
-    let heaviest_ts = get_heaviest_tipset(data.store.as_ref())?.ok_or("No heaviest tipset")?;
+    let heaviest_ts = get_heaviest_tipset(data.state_manager.get_block_store_ref())?
+        .ok_or("No heaviest tipset")?;
     let cid = heaviest_ts.parent_state();
 
-    let state = StateTree::new_from_root(data.store.as_ref(), &cid)?;
+    let state = StateTree::new_from_root(data.state_manager.get_block_store_ref(), &cid)?;
     match state.get_actor(&address) {
         Ok(act) => {
-            let actor = act.ok_or("Could not find actor")?;
-            let actor_balance = actor.balance;
-            Ok(actor_balance.to_string())
-        }
-        Err(e) => {
-            if e == "Address not found" {
-                return Ok(BigUint::default().to_string());
+            if let Some(actor) = act {
+                let actor_balance = actor.balance;
+                Ok(actor_balance.to_string())
+            } else {
+                Ok(BigUint::default().to_string())
             }
-            Err(e.into())
         }
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -174,7 +173,7 @@ where
 
     let addr_string = format!("wallet-{}", address);
     let key_info = keystore.get(&addr_string)?;
-    keystore.remove("default".to_string()); // This line should unregister current default key then continue
+    keystore.remove("default".to_string())?; // This line should unregister current default key then continue
     keystore.put("default".to_string(), key_info)?;
     Ok(())
 }

@@ -5,16 +5,16 @@ mod state;
 
 pub use self::state::{Entry, State};
 use crate::{check_empty_params, SYSTEM_ACTOR_ADDR};
+use encoding::tuple::*;
 use ipld_blockstore::BlockStore;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use runtime::{ActorCode, Runtime};
-use serde::{Deserialize, Serialize};
 use vm::{
     actor_error, ActorError, ExitCode, MethodNum, Serialized, TokenAmount, METHOD_CONSTRUCTOR,
 };
 
-// * Updated to specs-actors commit: 4784ddb8e54d53c118e63763e4efbcf0a419da28
+// * Updated to specs-actors commit: f4024efad09a66e32bfeef10a2845b2b35325297 (v0.9.3)
 
 /// Cron actor methods available
 #[derive(FromPrimitive)]
@@ -26,8 +26,7 @@ pub enum Method {
 
 /// Constructor parameters for Cron actor, contains entries
 /// of actors and methods to call on each epoch
-#[derive(Default, Clone, PartialEq, Debug, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Default, Clone, PartialEq, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct ConstructorParams {
     /// Entries is a set of actors (and corresponding methods) to call during EpochTick.
     pub entries: Vec<Entry>,

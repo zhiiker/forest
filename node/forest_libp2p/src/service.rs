@@ -18,7 +18,7 @@ use libp2p::{
     core::transport::boxed::Boxed,
     gossipsub::TopicHash,
     identity::{ed25519, Keypair},
-    mplex, secio, yamux, PeerId, Swarm, Transport,
+    mplex, noise, yamux, PeerId, Swarm, Transport,
 };
 use libp2p_request_response::{RequestId, ResponseChannel};
 use log::{debug, info, trace, warn};
@@ -39,7 +39,7 @@ const PUBSUB_TOPICS: [&str; 2] = [PUBSUB_BLOCK_STR, PUBSUB_MSG_STR];
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
     PubsubMessage {
-        source: PeerId,
+        source: Option<PeerId>,
         topics: Vec<TopicHash>,
         message: Vec<u8>,
     },
@@ -166,7 +166,7 @@ where
                             topics,
                             message,
                         } => {
-                            debug!("Got a Gossip Message from {:?}", source);
+                            trace!("Got a Gossip Message from {:?}", source);
                             self.network_sender_out.send(NetworkEvent::PubsubMessage {
                                 source,
                                 topics,
@@ -181,7 +181,7 @@ where
                             }).await;
                         }
                         ForestBehaviourEvent::HelloResponse { request_id, response, .. } => {
-                            debug!("Received hello response (id: {:?}): {:?}", request_id, response);
+                            debug!("Received hello response (id: {:?})", request_id);
                             self.network_sender_out.send(NetworkEvent::HelloResponse {
                                 request_id,
                                 response,
@@ -196,12 +196,12 @@ where
                             });
                         }
                         ForestBehaviourEvent::BlockSyncResponse { request_id, response, .. } => {
-                            debug!("Received blocksync response (id: {:?}): {:?}", request_id, response);
+                            debug!("Received blocksync response (id: {:?})", request_id);
                             let tx = self.bs_request_table.remove(&request_id);
 
                             if let Some(tx) = tx {
                                 if let Err(e) = tx.send(response) {
-                                    debug!("RPCResponse receive failed: {:?}", e)
+                                    debug!("RPCResponse receive failed")
                                 }
                             }
                             else {
@@ -244,7 +244,9 @@ where
                 rpc_message = network_stream.next() => match rpc_message {
                     Some(message) =>  match message {
                         NetworkMessage::PubsubMessage { topic, message } => {
-                            swarm_stream.get_mut().publish(&topic, message);
+                            if let Err(e) = swarm_stream.get_mut().publish(&topic, message) {
+                                warn!("Failed to send gossipsub message: {:?}", e);
+                            }
                         }
                         NetworkMessage::HelloRequest { peer_id, request } => {
                             let _ = swarm_stream.get_mut().send_rpc_request(&peer_id, RPCRequest::Hello(request));
@@ -278,11 +280,17 @@ where
 pub fn build_transport(local_key: Keypair) -> Boxed<(PeerId, StreamMuxerBox), Error> {
     let transport = libp2p::tcp::TcpConfig::new().nodelay(true);
     let transport = libp2p::dns::DnsConfig::new(transport).unwrap();
+    let dh_keys = noise::Keypair::<noise::X25519Spec>::new()
+        .into_authentic(&local_key)
+        .expect("Noise key generation failed");
+    let mut yamux_config = yamux::Config::default();
+    yamux_config.set_max_buffer_size(1 << 20);
+    yamux_config.set_receive_window(1 << 20);
     transport
         .upgrade(core::upgrade::Version::V1)
-        .authenticate(secio::SecioConfig::new(local_key))
+        .authenticate(noise::NoiseConfig::xx(dh_keys).into_authenticated())
         .multiplex(core::upgrade::SelectUpgrade::new(
-            yamux::Config::default(),
+            yamux_config,
             mplex::MplexConfig::new(),
         ))
         .map(|(peer, muxer), _| (peer, core::muxing::StreamMuxerBox::new(muxer)))
@@ -301,7 +309,7 @@ pub fn get_keypair(path: &str) -> Option<Keypair> {
         }
         Ok(mut vec) => match ed25519::Keypair::decode(&mut vec) {
             Ok(kp) => {
-                info!("Recovered keystore from {:?}", &path);
+                info!("Recovered libp2p keypair from {:?}", &path);
                 Some(Keypair::Ed25519(kp))
             }
             Err(e) => {

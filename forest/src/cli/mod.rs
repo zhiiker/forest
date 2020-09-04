@@ -6,12 +6,14 @@ mod mpool_cmd;
 mod config;
 mod fetch_params_cmd;
 mod genesis;
+mod genesis_cmd;
 
 pub(super) use self::chain_cmd::ChainCommands;
 pub(super) use self::mpool_cmd::MpoolCommands;
 pub use self::config::Config;
 pub(super) use self::fetch_params_cmd::FetchCommands;
 pub(super) use self::genesis::initialize_genesis;
+pub(super) use self::genesis_cmd::GenesisCommands;
 
 use jsonrpc_v2::Error as JsonRpcError;
 use std::cell::RefCell;
@@ -52,6 +54,9 @@ pub enum Subcommand {
 
     #[structopt(name = "mpool", about = "Interact with Filecoin MessagePool")]
     Mpool(MpoolCommands),
+
+    #[structopt(name = "genesis", about = "Work with blockchain genesis")]
+    Genesis(GenesisCommands),
 }
 
 /// Daemon process command line options.
@@ -65,6 +70,10 @@ pub struct DaemonOpts {
     pub rpc: Option<bool>,
     #[structopt(short, long, help = "The port used for communication")]
     pub port: Option<String>,
+    #[structopt(short, long, help = "Allow Kademlia (default = true)")]
+    pub kademlia: Option<bool>,
+    #[structopt(short, long, help = "Allow MDNS (default = true)")]
+    pub mdns: Option<bool>,
 }
 
 impl DaemonOpts {
@@ -87,6 +96,10 @@ impl DaemonOpts {
         } else {
             cfg.enable_rpc = false;
         }
+
+        cfg.network.kademlia = self.kademlia.unwrap_or(cfg.network.kademlia);
+        cfg.network.mdns = self.mdns.unwrap_or(cfg.network.mdns);
+
         // (where to find these flags, should be easy to do with structops)
 
         Ok(cfg)

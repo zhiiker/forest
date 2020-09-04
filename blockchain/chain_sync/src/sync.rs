@@ -294,8 +294,12 @@ where
                             self.state.write().await.set_epoch(curr_epoch);
 
                             // store messages
-                            self.chain_store.put_messages(&b.bls_msgs)?;
-                            self.chain_store.put_messages(&b.secp_msgs)?;
+                            if let Some(m) = b.messages {
+                                self.chain_store.put_messages(&m.bls_msgs)?;
+                                self.chain_store.put_messages(&m.secp_msgs)?;
+                            } else {
+                                warn!("Blocksync request for messages returned null messages");
+                            }
                         }
                     }
                     i -= REQUEST_WINDOW;
@@ -546,7 +550,7 @@ where
                 None => {
                     let actor = tree
                         .get_actor(msg.from())
-                        .map_err(Error::Other)?
+                        .map_err(|e| Error::Other(e.to_string()))?
                         .ok_or_else(|| {
                             Error::Other("Could not retrieve actor from state tree".to_owned())
                         })?;
@@ -642,6 +646,19 @@ where
             Err(err) => error_vec.push(err.to_string()),
         }
 
+        // base fee check
+        let base_fee = chain::compute_base_fee(self.chain_store.db.as_ref(), &parent_tipset)
+            .map_err(|e| {
+                Error::Validation(format!("Could not compute base fee: {}", e.to_string()))
+            })?;
+        if &base_fee != block.header().parent_base_fee() {
+            error_vec.push(format!(
+                "base fee doesnt match: {} (header), {} (computed)",
+                block.header().parent_base_fee(),
+                base_fee
+            ));
+        }
+
         let slash = self
             .state_manager
             .is_miner_slashed(header.miner_address(), &parent_tipset.parent_state())
@@ -653,9 +670,11 @@ where
             error_vec.push("Received block was from slashed or invalid miner".to_owned())
         }
 
-        let prev_beacon = self
-            .chain_store
-            .latest_beacon_entry(&self.chain_store.tipset_from_keys(header.parents())?)?;
+        let prev_beacon = chain::latest_beacon_entry(
+            self.chain_store.blockstore(),
+            &self.chain_store.tipset_from_keys(header.parents())?,
+        )?;
+
         header
             .validate_block_drand(Arc::clone(&self.beacon), prev_beacon)
             .await?;
@@ -665,11 +684,11 @@ where
             .get_power(&parent_tipset.parent_state(), header.miner_address());
         // ticket winner check
         match power_result {
-            Ok(pow_tuple) => {
-                let (c_pow, net_pow) = pow_tuple;
-                if !header.is_ticket_winner(c_pow, net_pow) {
-                    error_vec.push("Miner created a block but was not a winner".to_owned())
-                }
+            Ok((_c_pow, _net_pow)) => {
+                // TODO this doesn't seem to be checked currently
+                // if !header.is_ticket_winner(c_pow, net_pow) {
+                //     error_vec.push("Miner created a block but was not a winner".to_owned())
+                // }
             }
             Err(err) => error_vec.push(err.to_string()),
         }
@@ -1096,7 +1115,7 @@ mod tests {
         let (bls, secp) = construct_messages();
 
         let expected_root =
-            Cid::from_raw_cid("bafy2bzacebx7t56l6urh4os4kzar5asc5hmbhl7so6sfkzcgpjforkwylmqxa")
+            Cid::from_raw_cid("bafy2bzaceasssikoiintnok7f3sgnekfifarzobyr3r4f25sgxmn23q4c35ic")
                 .unwrap();
 
         let root = compute_msg_meta(cs.chain_store.blockstore(), &[bls], &[secp]).unwrap();
@@ -1115,7 +1134,7 @@ mod tests {
             compute_msg_meta(&blockstore, &usm, &sm)
                 .unwrap()
                 .to_string(),
-            "bafy2bzacecgw6dqj4bctnbnyqfujltkwu7xc7ttaaato4i5miroxr4bayhfea"
+            "bafy2bzacecmda75ovposbdateg7eyhwij65zklgyijgcjwynlklmqazpwlhba"
         );
     }
 }

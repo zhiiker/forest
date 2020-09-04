@@ -1,7 +1,6 @@
 // Copyright 2020 ChainSafe Systems
 // SPDX-License-Identifier: Apache-2.0, MIT
 
-use crate::signature::BLS_SIG_LEN;
 use encoding::{blake2b_256, serde_bytes};
 use serde::{Deserialize, Serialize};
 
@@ -25,18 +24,13 @@ impl VRFProof {
     pub fn digest(&self) -> [u8; 32] {
         blake2b_256(&self.0)
     }
-
-    /// Returns max value based on [BLS_SIG_LEN](constant.BLS_SIG_LEN.html)
-    pub fn max_value() -> Self {
-        // TODO revisit if this is necessary
-        Self::new([std::u8::MAX; BLS_SIG_LEN].to_vec())
-    }
 }
 
 #[cfg(feature = "json")]
 pub mod json {
     use super::*;
     use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+    use std::borrow::Cow;
 
     pub fn serialize<S>(m: &VRFProof, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -49,7 +43,9 @@ pub mod json {
     where
         D: Deserializer<'de>,
     {
-        let s: String = Deserialize::deserialize(deserializer)?;
-        Ok(VRFProof::new(base64::decode(s).map_err(de::Error::custom)?))
+        let s: Cow<'de, str> = Deserialize::deserialize(deserializer)?;
+        Ok(VRFProof::new(
+            base64::decode(s.as_ref()).map_err(de::Error::custom)?,
+        ))
     }
 }
