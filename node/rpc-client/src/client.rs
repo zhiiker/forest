@@ -11,6 +11,8 @@ use jsonrpsee::transport::http::HttpTransportClient;
 use message::{unsigned_message::json::UnsignedMessageJson, signed_message::json::SignedMessageJson};
 use cid::json::vec::CidJsonVec;
 use message_pool::json::MpSubChangeJson;
+use address::Address;
+use blocks::TipsetKeys;
 
 jsonrpsee::rpc_api! {
     pub Filecoin {
@@ -39,6 +41,10 @@ jsonrpsee::rpc_api! {
 
         #[rpc(method = "Filecoin.MpoolSub")]
         fn mpool_sub() -> MpSubChangeJson;
+
+        /// State
+        #[rpc(method = "Filecoin.StateGetActor")]
+        fn state_get_actor(data: (Address, TipsetKeys)) -> Option<actor::ActorState>;
     }
 }
 

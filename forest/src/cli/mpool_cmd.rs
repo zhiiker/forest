@@ -42,10 +42,10 @@ impl MpoolCommands {
                 println!("{}", serde_json::to_string_pretty(&sub).unwrap());
             }
             Self::Stat { local } => {
-                unimplemented!()
-                // let mut client = new_client();
-                // let stat = stat(&mut client, local).await.map_err(stringify_rpc_err).unwrap();
-                // println!("{}", serde_json::to_string_pretty(&stat).unwrap());
+                let mut client = new_client();
+                let stat = stat(&mut client, local).await.map_err(stringify_rpc_err).unwrap();
+
+                println!("{}", serde_json::to_string_pretty(&stat).unwrap());
             }
         }
     }

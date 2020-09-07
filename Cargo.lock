@@ -5642,11 +5642,8 @@ dependencies = [
  "chain_sync",
  "clock",
  "db",
-<<<<<<< HEAD
- "flo_stream",
-=======
  "fil_types",
->>>>>>> main
+ "flo_stream",
  "forest_address",
  "forest_bigint",
  "forest_blocks",
@@ -5678,6 +5675,8 @@ dependencies = [
 name = "rpc-client"
 version = "0.1.0"
 dependencies = [
+ "actor",
+ "base64 0.12.3",
  "forest_address",
  "forest_blocks",
  "forest_cid",
@@ -5686,6 +5685,7 @@ dependencies = [
  "forest_message",
  "jsonrpc-v2",
  "jsonrpsee",
+ "key_management",
  "log",
  "message_pool",
  "serde",

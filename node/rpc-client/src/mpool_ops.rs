@@ -14,8 +14,10 @@ use std::str::FromStr;
 use message::Message;
 use blocks::tipset_json::TipsetJson;
 use message_pool::json::MpSubChangeJson;
+use actor::ActorState;
+use crate::mpool_ops::json::MpStatJson;
 
-
+/// Get all pending messages in message pool
 pub async fn pending(client: &mut RawClient<HTC>, local: &String) ->  Result<Vec<SignedMessageJson>, JsonRpcError> {
     let mut filter: Vec<Address> = Vec::new();
 
@@ -48,11 +50,12 @@ pub async fn sub(client: &mut RawClient<HTC>) -> Result<MpSubChangeJson, JsonRpc
     Ok(Filecoin::mpool_sub(client).await?)
 }
 
-
+/// Struct that will contain all of the message pool stats
 pub struct StatBucket {
     pub msgs: HashMap<u64, SignedMessage>
 }
 
+/// This is the struct that will be used to display stats of the message pool
 pub struct MpStat {
     pub addr: String,
     pub past: u64,
@@ -143,14 +146,10 @@ pub mod json {
     }
 }
 
-
-pub async fn stat(client: &mut RawClient<HTC>, local: &String) -> Result<Vec<MpStat>, JsonRpcError>
+/// Get the stats of the message pool
+pub async fn stat(client: &mut RawClient<HTC>, local: &String) -> Result<Vec<MpStatJson>, JsonRpcError>
 {
-
-    // remove unwrap after state_get_actor is done
-
-    // remove comment when state_get_actor is done
-    // let TipsetJson(tipset) = Filecoin::chain_get_head(client).await.unwrap();
+    let TipsetJson(tipset) = Filecoin::chain_get_head(client).await.unwrap();
 
 
     let mut filter: Vec<Address> = Vec::new();
@@ -184,10 +183,47 @@ pub async fn stat(client: &mut RawClient<HTC>, local: &String) -> Result<Vec<MpS
         buckets.get_mut(item.from()).unwrap().msgs.insert(item.sequence(), item);
     }
 
-    // let out = Vec::new();
+    let mut out = Vec::new();
 
-    // for (k, v) in buckets {
-    // }
+    for (k, bkt) in buckets {
+        let act: ActorState = Filecoin::state_get_actor(client, (k, tipset.parents().clone())).await.unwrap().unwrap();
 
-    unimplemented!()
+        let mut cur = act.sequence;
+        loop {
+            let s = bkt.msgs.get(&cur);
+            if s.is_none() {
+                break
+            cur += 1;}
+        }
+
+        let mut past = 0;
+        let mut future = 0;
+
+        for (_, m) in bkt.msgs {
+            if m.message().sequence < act.sequence {
+                past += 1;
+            }
+            if m.message().sequence > cur {
+                future += 1;
+            }
+        }
+
+        out.push(MpStat {
+            addr: k.to_string(),
+            past,
+            cur: cur - act.sequence,
+            future
+        })
+    }
+
+    out.sort_by(|a, b| {
+        a.addr.cmp(&b.addr)
+    });
+
+    let mut out_json = Vec::new();
+    for i in out {
+        out_json.push(MpStatJson(i))
+    }
+
+    Ok(out_json)
 }

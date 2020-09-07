@@ -71,7 +71,6 @@ impl MsgSet {
 }
 
 
-// TODO need to implement json serialization for this struct
 #[derive(Clone)]
 pub struct MpSubChange {
     pub change_type: u8, // add: 0, remove: 1
