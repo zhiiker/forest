@@ -166,6 +166,7 @@ impl fmt::Display for Address {
 impl FromStr for Address {
     type Err = Error;
     fn from_str(addr: &str) -> Result<Self, Error> {
+        println!("address length {:?}",addr.clone());
         if addr.len() > MAX_ADDRESS_LEN || addr.len() < 3 {
             return Err(Error::InvalidLength);
         }
@@ -338,6 +339,12 @@ pub mod json {
         }
     }
 
+    impl From<AddressJson> for Address {
+        fn from(address: AddressJson) -> Self {
+            address.0
+        }
+    }
+
     pub fn serialize<S>(m: &Address, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -353,3 +360,40 @@ pub mod json {
         Ok(Address::from_str(&address_as_string).map_err(de::Error::custom)?)
     }
 }
+
+#[cfg(feature = "json")]
+pub mod vec_json {
+    use super::*;
+    use forest_json_utils::GoVecVisitor;
+    use serde::ser::SerializeSeq;
+    use crate::json::{AddressJsonRef,AddressJson};
+
+    /// Wrapper for serializing and deserializing a Cid vector from JSON.
+    #[derive(Deserialize, Serialize)]
+    #[serde(transparent)]
+    pub struct AddressJsonVec(#[serde(with = "self")] pub Vec<Address>);
+
+    /// Wrapper for serializing a cid slice to JSON.
+    #[derive(Serialize)]
+    #[serde(transparent)]
+    pub struct AddressJsonSlice<'a>(#[serde(with = "self")] pub &'a [Address]);
+
+    pub fn serialize<S>(m: &[Address], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(m.len()))?;
+        for e in m {
+            seq.serialize_element(&AddressJsonRef(e))?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Address>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(GoVecVisitor::<Address, AddressJson>::new())
+    }
+}
+

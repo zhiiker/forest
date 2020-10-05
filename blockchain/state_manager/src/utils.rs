@@ -232,6 +232,7 @@ pub fn get_miner_info<DB>(
 where
     DB: BlockStore,
 {
+    println!("Address miner_info {:?}",&tipset.parent_state());
     let miner_actor_state: miner::State = state_manager
         .load_actor_state(&address, &tipset.parent_state())
         .map_err(|err| {

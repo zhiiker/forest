@@ -31,7 +31,7 @@ jsonrpsee::rpc_api! {
 }
 
 // TODO need to handle dynamic port
-const URL: &str = "http://127.0.0.1:1234/rpc/v0";
+const URL: &str = "http://127.0.0.1:1235/rpc/v0";
 
 // TODO pass config for URL
 pub fn new_client() -> RawClient<HttpTransportClient> {

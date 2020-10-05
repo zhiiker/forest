@@ -125,12 +125,14 @@ pub async fn state_miner_info<
     KS: KeyStore + Send + Sync + 'static,
 >(
     data: Data<RpcState<DB, KS>>,
-    Params(params): Params<(Address, TipsetKeys)>,
+    Params(params): Params<(AddressJson, TipsetKeys)>,
 ) -> Result<MinerInfo, JsonRpcError> {
-    let state_manager = &data.state_manager;
     let (actor, key) = params;
-    let tipset = chain::tipset_from_keys(state_manager.blockstore(), &key)?;
-    state_manager::utils::get_miner_info(&state_manager, &tipset, &actor).map_err(|e| e.into())
+    let actor : Address = actor.into();
+    let state_manager = data.state_manager.clone();
+    let miner_actor_state : actor::miner::State = state_manager.load_actor_tsk::<actor::miner::State>(&actor,&key)?;
+    let state_manager = data.state_manager.clone();
+    Ok(miner_actor_state.get_info(state_manager.blockstore())?)
 }
 
 /// returns the on-chain info for the specified miner's sector
@@ -288,6 +290,33 @@ pub(crate) async fn state_account_key<
     let address = interpreter::resolve_to_key_addr(&state, state_manager.blockstore(), &actor)?;
     Ok(Some(address.into()))
 }
+
+
+#[derive(Serialize)]
+pub enum APIVersionType
+{
+    FullAPIVersion,
+    WorkerAPIVersion,
+    MinerAPIVersion
+}
+
+#[derive(Serialize)]
+pub struct APIVersion
+{
+    Version : String,
+    ApiVersion : u32,
+    BlockDelay : u32
+}
+
+pub(crate) async fn state_version() -> Result<APIVersion,JsonRpcError>
+{
+    Ok(APIVersion
+    {
+        Version : "0.16.0".to_string(),
+        ApiVersion : 0 <<16 | 16<<8 | 0,
+        BlockDelay : 2
+    })
+}
 /// retrieves the ID address of the given address
 pub(crate) async fn state_lookup_id<
     DB: BlockStore + Send + Sync + 'static,
@@ -334,6 +363,21 @@ pub(crate) async fn state_get_receipt<
         .get_receipt(&tipset, &cid)
         .map(|s| s.into())
         .map_err(|e| e.into())
+}
+
+
+/// returns the message receipt for the given message
+pub(crate) async fn state_network_name<
+    DB: BlockStore + Send + Sync + 'static,
+    KS: KeyStore + Send + Sync + 'static,
+>(
+    data: Data<RpcState<DB, KS>>
+) -> Result<String, JsonRpcError> 
+{
+    let state = &data.state_manager;
+    let heaviest = chain::get_heaviest_tipset(state.blockstore())?;
+    state.get_network_name(heaviest.unwrap().parent_state())
+    .map_err(|e|e.into())
 }
 /// looks back in the chain for a message. If not found, it blocks until the
 /// message arrives on chain, and gets to the indicated confidence depth.

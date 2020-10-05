@@ -209,6 +209,7 @@ where
         fill_tipsets(self.blockstore(), ts)
     }
 
+
     /// Determines if provided tipset is heavier than existing known heaviest tipset
     async fn update_heaviest(&self, ts: &Tipset) -> Result<(), Error> {
         match self.heaviest.read().await.as_ref() {

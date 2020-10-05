@@ -923,15 +923,18 @@ pub struct MinerInfo {
     /// Account that owns this miner
     /// - Income and returned collateral are paid to this address
     /// - This address is also allowed to change the worker address for the miner
+    #[serde(with = "address::json")]
     pub owner: Address,
 
     /// Worker account for this miner
     /// This will be the key that is used to sign blocks created by this miner, and
     /// sign messages sent on behalf of this miner to commit sectors, submit PoSts, and
     /// other day to day miner activities
+    #[serde(with = "address::json")]
     pub worker: Address,
 
     /// Additional addresses that are permitted to submit messages controlling this actor (optional).
+    #[serde(with = "address::vec_json")]
     pub control_addresses: Vec<Address>, // Must all be ID addresses.
 
     /// Optional worker key to update at an epoch

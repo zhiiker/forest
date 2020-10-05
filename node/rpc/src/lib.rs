@@ -181,6 +181,8 @@ where
             state_sector_precommit_info::<DB, KS>,
             false,
         )
+        .with_method("Filecoin.Version",state_version,false)
+        .with_method("Filecoin.StateNetworkName",state_network_name::<DB,KS>,false)
         .with_method(
             "Filecoin.StateSectorInfo",
             state_sector_info::<DB, KS>,
@@ -285,6 +287,7 @@ async fn handle_connection_and_log(
                 match message_result {
                     Ok(message) => {
                         let request_text = message.into_text().unwrap();
+                        info!("request {:?}",request_text.clone());
                         match serde_json::from_str(&request_text)
                             as Result<RequestObject, serde_json::Error>
                         {

@@ -109,6 +109,50 @@ where
             .map_err(|e| Error::State(e.to_string()))
     }
 
+    pub fn load_actor_tsk<D>(&self,address:&Address,tsk:&TipsetKeys) -> Result<D, Error>
+    where
+    D: DeserializeOwned,
+    {
+        let state = self.parent_state_tsk(tsk)?;
+        let actor = state
+        .get_actor(address)
+        .map_err(|e| Error::State(e.to_string()))?
+        .ok_or_else(|| Error::ActorStateNotFound("Not found".to_string()))?;
+        let act: D = self
+        .bs
+        .get(&actor.state)
+        .map_err(|e| Error::State(e.to_string()))?
+        .ok_or_else(|| Error::ActorStateNotFound("Not found".to_string()))?;
+    Ok(act)
+
+    }
+
+    pub fn parent_state_tsk(&self,tsk:&TipsetKeys) -> Result<StateTree<'_,DB>,Error>
+    {
+        let tipset = chain::tipset_from_keys(self.blockstore(), tsk)
+        .map_err(|e| Error::State(e.to_string()))?;
+        self.parent_state_tree(&tipset)
+    }
+
+    pub fn parent_state_tree(&self,tipset: &Tipset) -> Result<StateTree<'_,DB>,Error>
+    {
+        let state_cid = &self.parent_state(Some(tipset))?;
+        let state = StateTree::new_from_root(self.bs.as_ref(), state_cid)
+            .map_err(|e| Error::State(e.to_string()))?;
+        Ok(state)
+
+    }
+    pub fn parent_state(&self, tipset:Option<&Tipset>) -> Result<Cid,Error>
+    {
+        match tipset
+        {
+            Some(tipset) => Ok(tipset.parent_state().clone()),
+            None =>chain::get_heaviest_tipset(self.blockstore())
+                   .map(|s|s.unwrap().parent_state().clone())
+                   .map_err(|_| Error::Other("Could not get heaviest tipset".to_string()))
+        }
+    }
+
     pub fn blockstore_cloned(&self) -> Arc<DB> {
         self.bs.clone()
     }
