@@ -106,7 +106,7 @@ where
     // Batch write key value pairs from car file
     let mut buf: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(100);
     while let Some(block) = car_reader.next_block().await? {
-        buf.push((block.cid.to_bytes(), block.data));
+        buf.push((block.cid.hash().to_bytes(), block.data));
         if buf.len() > 1000 {
             s.bulk_write(&buf)
                 .map_err(|e| Error::Other(e.to_string()))?;
@@ -170,6 +170,9 @@ mod tests {
         let db = db::MemoryDB::default();
         load_car(&db, reader).await.unwrap();
 
-        assert_eq!(db.read(&cid.to_bytes()).unwrap(), Some(b"test".to_vec()));
+        assert_eq!(
+            db.read(&cid.hash().to_bytes()).unwrap(),
+            Some(b"test".to_vec())
+        );
     }
 }

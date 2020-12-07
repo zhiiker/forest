@@ -28,7 +28,7 @@ use db::rocks::{RocksDb, WriteBatch};
 pub trait BlockStore: Store {
     /// Get bytes from block store by Cid.
     fn get_bytes(&self, cid: &Cid) -> Result<Option<Vec<u8>>, Box<dyn StdError>> {
-        Ok(self.read(cid.to_bytes())?)
+        Ok(self.read(cid.hash().to_bytes())?)
     }
 
     /// Get typed object from block store by Cid.
@@ -54,7 +54,7 @@ pub trait BlockStore: Store {
     /// Put raw bytes in the block store and return the Cid identifier.
     fn put_raw(&self, bytes: Vec<u8>, code: Code) -> Result<Cid, Box<dyn StdError>> {
         let cid = cid::new_from_cbor(&bytes, code);
-        self.write(cid.to_bytes(), bytes)?;
+        self.write(cid.hash().to_bytes(), bytes)?;
         Ok(cid)
     }
 
@@ -86,7 +86,7 @@ impl BlockStore for RocksDb {
             .map(|v| {
                 let bz = to_vec(v)?;
                 let cid = cid::new_from_cbor(&bz, code);
-                batch.put(cid.to_bytes(), bz);
+                batch.put(cid.hash().to_bytes(), bz);
                 Ok(cid)
             })
             .collect::<Result<_, Box<dyn StdError>>>()?;

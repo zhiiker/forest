@@ -11,9 +11,9 @@ impl BlockStore for SledDb {
         let cid = cid::new_from_cbor(&bytes, code);
         // Can do a unique compare and swap here, should only need to write when entry doesn't
         // exist as all Cids "should" be unique. If the value exists, ignore.
-        let _ = self
-            .db
-            .compare_and_swap(cid.to_bytes(), None as Option<&[u8]>, Some(bytes))?;
+        let _ =
+            self.db
+                .compare_and_swap(cid.hash().to_bytes(), None as Option<&[u8]>, Some(bytes))?;
         Ok(cid)
     }
 }

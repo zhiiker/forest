@@ -58,7 +58,7 @@ where
         self.stats.borrow_mut().w += 1;
         self.stats.borrow_mut().bw += bytes.len();
         let cid = cid::new_from_cbor(&bytes, code);
-        self.write(cid.to_bytes(), bytes)?;
+        self.write(cid.hash().to_bytes(), bytes)?;
         Ok(cid)
     }
 }

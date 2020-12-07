@@ -4,7 +4,7 @@
 #![cfg(feature = "buffered")]
 
 use super::BlockStore;
-use cid::{Cid, Code, DAG_CBOR};
+use cid::{Cid, Code, Multihash, DAG_CBOR};
 use db::{Error, Store};
 use encoding::from_slice;
 use forest_ipld::Ipld;
@@ -17,7 +17,7 @@ use std::error::Error as StdError;
 #[derive(Debug)]
 pub struct BufferedBlockStore<'bs, BS> {
     base: &'bs BS,
-    write: RefCell<HashMap<Cid, Vec<u8>>>,
+    write: RefCell<HashMap<Multihash, Vec<u8>>>,
 }
 
 impl<'bs, BS> BufferedBlockStore<'bs, BS>
@@ -44,7 +44,7 @@ where
 /// Recursively traverses cache through Cid links.
 fn write_recursive<BS>(
     base: &BS,
-    cache: &HashMap<Cid, Vec<u8>>,
+    cache: &HashMap<Multihash, Vec<u8>>,
     cid: &Cid,
 ) -> Result<(), Box<dyn StdError>>
 where
@@ -55,7 +55,7 @@ where
         return Ok(());
     }
 
-    let raw_cid_bz = cid.to_bytes();
+    let raw_cid_bz = cid.hash().to_bytes();
 
     // If root exists in base store already, can skip
     if base.exists(&raw_cid_bz)? {
@@ -63,7 +63,7 @@ where
     }
 
     let raw_bz = cache
-        .get(cid)
+        .get(cid.hash())
         .ok_or_else(|| format!("Invalid link ({}) in flushing buffered store", cid))?;
 
     // Deserialize the bytes to Ipld to traverse links.
@@ -106,7 +106,7 @@ where
     BS: BlockStore,
 {
     fn get_bytes(&self, cid: &Cid) -> Result<Option<Vec<u8>>, Box<dyn StdError>> {
-        if let Some(data) = self.write.borrow().get(cid) {
+        if let Some(data) = self.write.borrow().get(cid.hash()) {
             return Ok(Some(data.clone()));
         }
 
@@ -115,7 +115,7 @@ where
 
     fn put_raw(&self, bytes: Vec<u8>, code: Code) -> Result<Cid, Box<dyn StdError>> {
         let cid = cid::new_from_cbor(&bytes, code);
-        self.write.borrow_mut().insert(cid, bytes);
+        self.write.borrow_mut().insert(*cid.hash(), bytes);
         Ok(cid)
     }
 }
@@ -189,7 +189,7 @@ mod tests {
         buf_store.flush(&cid).unwrap();
         assert_eq!(buf_store.get::<u8>(&cid).unwrap(), Some(8));
         assert_eq!(mem.get::<u8>(&cid).unwrap(), Some(8));
-        assert_eq!(buf_store.write.borrow().get(&cid), None);
+        assert_eq!(buf_store.write.borrow().get(cid.hash()), None);
     }
 
     #[test]
