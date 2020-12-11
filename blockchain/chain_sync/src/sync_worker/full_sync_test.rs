@@ -4,7 +4,7 @@
 use super::*;
 use crate::peer_manager::PeerManager;
 use actor::EPOCH_DURATION_SECONDS;
-use async_std::sync::channel;
+use async_std::channel::bounded;
 use async_std::task;
 use beacon::{DrandBeacon, DrandPublic};
 use db::MemoryDB;
@@ -45,7 +45,7 @@ async fn space_race_full_sync() {
     let chain_store = Arc::new(ChainStore::new(db.clone()));
     let state_manager = Arc::new(StateManager::new(chain_store));
 
-    let (network_send, network_recv) = channel(20);
+    let (network_send, network_recv) = bounded(20);
 
     // Initialize genesis using default (currently space-race) genesis
     let (genesis, _) = initialize_genesis(None, &state_manager).await.unwrap();

@@ -10,7 +10,8 @@ use super::sync_state::SyncState;
 use super::sync_worker::SyncWorker;
 use super::{Error, SyncNetworkContext};
 use amt::Amt;
-use async_std::sync::{channel, Receiver, RwLock, Sender};
+use async_std::channel::{bounded, Receiver, Sender};
+use async_std::sync::RwLock;
 use async_std::task::{self, JoinHandle};
 use beacon::Beacon;
 use blocks::{Block, FullTipset, Tipset, TipsetKeys, TxMeta};
@@ -24,7 +25,7 @@ use futures::select;
 use futures::stream::StreamExt;
 use ipld_blockstore::BlockStore;
 use libp2p::core::PeerId;
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use message::{SignedMessage, UnsignedMessage};
 use message_pool::{MessagePool, Provider};
 use state_manager::StateManager;
@@ -176,7 +177,8 @@ where
                     .heaviest_tipset()
                     .await
                     .unwrap();
-                self.network
+                if let Err(e) = self
+                    .network
                     .hello_request(
                         peer_id,
                         HelloRequest {
@@ -187,6 +189,9 @@ where
                         },
                     )
                     .await
+                {
+                    error!("{}", e)
+                };
             }
             NetworkEvent::PubsubMessage { source, message } => {
                 if self.state != ChainSyncState::Follow {
@@ -280,7 +285,7 @@ where
         }
 
         // Channels to handle fetching hello tipsets in separate task and return tipset.
-        let (new_ts_tx, new_ts_rx) = channel(10);
+        let (new_ts_tx, new_ts_rx) = bounded(10);
 
         let mut fused_handler = self.net_handler.clone().fuse();
         let mut fused_inform_channel = new_ts_rx.fuse();
@@ -291,7 +296,10 @@ where
                 if let Some(tar) = self.next_sync_target.take() {
                     if let Some(ts) = tar.heaviest_tipset() {
                         self.active_sync_tipsets.insert(ts.clone());
-                        worker_tx.send(ts).await;
+                        worker_tx
+                            .send(ts)
+                            .await
+                            .expect("Worker receivers should not be dropped");
                     }
                 }
             }
@@ -323,7 +331,10 @@ where
     ) {
         match Self::fetch_full_tipset(cs.as_ref(), &network, peer_id.clone(), &tsk).await {
             Ok(fts) => {
-                channel.send((peer_id, fts)).await;
+                channel
+                    .send((peer_id, fts))
+                    .await
+                    .expect("Inform tipset receiver dropped");
             }
             Err(e) => {
                 debug!("Failed to fetch full tipset from peer ({}): {}", peer_id, e);
@@ -547,8 +558,7 @@ fn cids_from_messages<T: Cbor>(messages: &[T]) -> Result<Vec<Cid>, EncodingError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_std::sync::channel;
-    use async_std::sync::Sender;
+    use async_std::channel::{bounded, Sender};
     use async_std::task;
     use beacon::MockBeacon;
     use db::MemoryDB;
@@ -570,7 +580,7 @@ mod tests {
     ) {
         let chain_store = Arc::new(ChainStore::new(db.clone()));
         let test_provider = TestApi::default();
-        let (tx, _rx) = channel(10);
+        let (tx, _rx) = bounded(10);
         let mpool = task::block_on(MessagePool::new(
             test_provider,
             "test".to_string(),
@@ -579,8 +589,8 @@ mod tests {
         ))
         .unwrap();
         let mpool = Arc::new(mpool);
-        let (local_sender, test_receiver) = channel(20);
-        let (event_sender, event_receiver) = channel(20);
+        let (local_sender, test_receiver) = bounded(20);
+        let (event_sender, event_receiver) = bounded(20);
 
         let gen = construct_dummy_header();
         chain_store.set_genesis(&gen).unwrap();

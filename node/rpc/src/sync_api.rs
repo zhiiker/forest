@@ -120,7 +120,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_std::sync::{channel, Receiver, RwLock};
+    use async_std::channel::{bounded, Receiver};
+    use async_std::sync::RwLock;
     use async_std::task;
     use beacon::{BeaconPoint, MockBeacon, Schedule};
     use blocks::{BlockHeader, Tipset};
@@ -143,7 +144,7 @@ mod tests {
     ) {
         let beacon = MockBeacon::new(std::time::Duration::from_secs(2));
 
-        let (network_send, network_rx) = channel(5);
+        let (network_send, network_rx) = bounded(5);
         let db = Arc::new(MemoryDB::default());
         let cs_arc = Arc::new(ChainStore::new(db.clone()));
         let state_manager = Arc::new(StateManager::new(cs_arc.clone()));
@@ -177,7 +178,7 @@ mod tests {
             .await
             .unwrap()
         });
-        let (new_mined_block_tx, _) = channel(5);
+        let (new_mined_block_tx, _) = bounded(5);
         let beacon = Arc::new(beacon);
         let state = Arc::new(RpcState {
             state_manager,
