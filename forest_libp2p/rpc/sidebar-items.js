@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["RPCRequest","RPCRequest payloads for request/response calls"],["RPCResponse","RPCResponse payloads for request/response calls"]],"struct":[["CborRequestResponse",""],["RequestId","The (local) ID of an outgoing request."],["ResponseChannel","A channel for sending a response to an inbound request."]]});
