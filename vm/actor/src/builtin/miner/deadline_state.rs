@@ -1005,12 +1005,13 @@ impl Deadline {
         partition_sectors: &mut PartitionSectorMap,
         sector_size: SectorSize,
         quant: QuantSpec,
-    ) -> Result<(), Box<dyn StdError>> {
+    ) -> Result<Vec<SectorOnChainInfo>, Box<dyn StdError>> {
         let mut partitions = self.partitions_amt(store)?;
 
         // track partitions with moved expirations.
         let mut rescheduled_partitions = Vec::<u64>::new();
 
+        let mut all_replaced = Vec::new();
         for (partition_idx, sector_numbers) in partition_sectors.iter() {
             let mut partition = match partitions.get(partition_idx).map_err(|e| {
                 e.downcast_wrap(format!("failed to load partition {}", partition_idx))
@@ -1024,7 +1025,7 @@ impl Deadline {
                 }
             };
 
-            let moved = partition
+            let replaced = partition
                 .reschedule_expirations(
                     store,
                     sectors,
@@ -1040,10 +1041,11 @@ impl Deadline {
                     ))
                 })?;
 
-            if moved.is_empty() {
+            if replaced.is_empty() {
                 // nothing moved.
                 continue;
             }
+            all_replaced.copy_from_slice(&replaced);
 
             rescheduled_partitions.push(partition_idx);
             partitions.set(partition_idx, partition).map_err(|e| {

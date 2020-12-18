@@ -598,8 +598,7 @@ impl Actor {
 
             // Note: We could delay this charge until end of deadline, but that would require more accounting state.
             let total_penalty_target = undeclared_penalty_target + declared_penalty_target;
-            let unlocked_balance =
-                state.get_unlocked_balance(&rt.current_balance()?, rt.network_version())?;
+            let unlocked_balance = state.get_unlocked_balance(&rt.current_balance()?)?;
             let (vesting_penalty_total, balance_penalty_total) = state
                 .penalize_funds_in_priority_order(
                     rt.store(),
@@ -838,8 +837,7 @@ impl Actor {
                     e.downcast_default(ExitCode::ErrIllegalState, "failed to vest funds")
                 })?;
 
-            let available_balance =
-                state.get_available_balance(&rt.current_balance()?, rt.network_version())?;
+            let available_balance = state.get_available_balance(&rt.current_balance()?)?;
             let duration = params.expiration - rt.curr_epoch();
 
             let sector_weight = qa_power_for_weight(
@@ -867,7 +865,7 @@ impl Actor {
             }
 
             state.add_pre_commit_deposit(&deposit_req);
-            state.assert_balance_invariants(&rt.current_balance()?, rt.network_version())?;
+            state.check_balance_invariants(&rt.current_balance()?, rt.network_version())?;
 
             let seal_proof = params.seal_proof;
             let sector_number = params.sector_number;
@@ -1173,13 +1171,17 @@ impl Actor {
                     seal_proof: pre_commit.info.seal_proof,
                     sealed_cid: pre_commit.info.sealed_cid,
                     deal_ids: pre_commit.info.deal_ids,
-                    activation,
                     expiration: pre_commit.info.expiration,
+                    activation,
                     deal_weight: pre_commit.deal_weight,
                     verified_deal_weight: pre_commit.verified_deal_weight,
                     initial_pledge,
                     expected_day_reward: day_reward,
                     expected_storage_pledge: storage_pledge,
+
+                    // TODO
+                    replaced_sector_age: Default::default(),
+                    replaced_day_reward: Default::default(),
                 };
 
                 new_sector_numbers.push(new_sector_info.sector_number);
@@ -1227,8 +1229,7 @@ impl Actor {
             // Unlock deposit for successful proofs, make it available for lock-up as initial pledge.
             state.add_pre_commit_deposit(&(-total_pre_commit_deposit));
 
-            let available_balance =
-                state.get_available_balance(&rt.current_balance()?, rt.network_version())?;
+            let available_balance = state.get_available_balance(&rt.current_balance()?)?;
             if available_balance < total_pledge {
                 return Err(actor_error!(
                     ErrInsufficientFunds,
@@ -1238,8 +1239,8 @@ impl Actor {
                 ));
             }
 
-            state.add_initial_pledge_requirement(&total_pledge);
-            state.assert_balance_invariants(&rt.current_balance()?, rt.network_version())?;
+            state.add_initial_pledge(&total_pledge);
+            state.check_balance_invariants(&rt.current_balance()?, rt.network_version())?;
 
             Ok((new_power, total_pledge, newly_vested))
         })?;
@@ -2089,8 +2090,7 @@ impl Actor {
             // This may lock up unlocked balance that was covering InitialPledgeRequirements
             // This ensures that the amountToLock is always locked up if the miner account
             // can cover it.
-            let unlocked_balance =
-                st.get_unlocked_balance(&rt.current_balance()?, rt.network_version())?;
+            let unlocked_balance = st.get_unlocked_balance(&rt.current_balance()?)?;
             if unlocked_balance < amount_to_lock {
                 return Err(actor_error!(
                     ErrInsufficientFunds,
@@ -2215,7 +2215,7 @@ impl Actor {
 
         let curr_balance = rt.current_balance()?;
         let amount_withdrawn = cmp::min(
-            state.get_available_balance(&curr_balance, rt.network_version())?,
+            state.get_available_balance(&curr_balance)?,
             params.amount_requested,
         );
         assert!(!amount_withdrawn.is_negative());
@@ -2230,7 +2230,7 @@ impl Actor {
 
         notify_pledge_changed(rt, &newly_vested.neg())?;
 
-        state.assert_balance_invariants(&rt.current_balance()?, rt.network_version())?;
+        state.check_balance_invariants(&rt.current_balance()?, rt.network_version())?;
         Ok(())
     }
 
@@ -2332,8 +2332,7 @@ where
 
             // Unlock funds for penalties.
             // We're intentionally reducing the penalty paid to what we have.
-            let unlocked_balance =
-                state.get_unlocked_balance(&rt.current_balance()?, rt.network_version())?;
+            let unlocked_balance = state.get_unlocked_balance(&rt.current_balance()?)?;
             let (penalty_from_vesting, penalty_from_balance) = state
                 .penalize_funds_in_priority_order(
                     store,
@@ -2347,7 +2346,7 @@ where
             let penalty = &penalty_from_vesting + penalty_from_balance;
 
             // Remove pledge requirement.
-            state.add_initial_pledge_requirement(&-&total_initial_pledge);
+            state.add_initial_pledge(&-&total_initial_pledge);
             let pledge_delta = -(total_initial_pledge + penalty_from_vesting);
 
             Ok((result, more, deals_to_terminate, penalty, pledge_delta))
@@ -2456,8 +2455,7 @@ where
             .map_err(|e| e.wrap(format!("failed to load deadline {}", deadline_info.index)))?;
 
         let quant = deadline_info.quant_spec();
-        let mut unlocked_balance =
-            state.get_unlocked_balance(&rt.current_balance()?, rt.network_version())?;
+        let mut unlocked_balance = state.get_unlocked_balance(&rt.current_balance()?)?;
 
         let previously_faulty_power = deadline.faulty_power.qa.clone();
 
@@ -2558,7 +2556,7 @@ where
         // Pledge for the sectors expiring early is retained to support the termination fee that will be assessed
         // when the early termination is processed.
         pledge_delta -= &expired.on_time_pledge;
-        state.add_initial_pledge_requirement(&-expired.on_time_pledge);
+        state.add_initial_pledge(&-expired.on_time_pledge);
 
         // Record reduction in power of the amount of expiring active power.
         // Faulty power has already been lost, so the amount expiring can be excluded from the delta.
@@ -3122,14 +3120,14 @@ where
     BS: BlockStore,
     RT: Runtime<BS>,
 {
-    if state.meets_initial_pledge_condition(&rt.current_balance()?, rt.network_version())? {
+    if state.meets_initial_pledge_condition(&rt.current_balance()?)? {
         Ok(())
     } else {
         Err(actor_error!(
             ErrInsufficientFunds,
             "unlocked balance does not cover pledge requirements ({} < {})",
-            state.get_unlocked_balance(&rt.current_balance()?, rt.network_version())?,
-            state.initial_pledge_requirement
+            state.get_unlocked_balance(&rt.current_balance()?)?,
+            state.initial_pledge
         ))
     }
 }
