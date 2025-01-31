@@ -1,40 +1,72 @@
 # This Dockerfile is for the main forest binary
-# Example usage:
+# 
+# Build and run locally:
+# ```
 # docker build -t forest:latest -f ./Dockerfile .
-# docker run forest
+# docker run --init -it forest
+# ```
+# 
 
-FROM rust:1-buster AS build-env
+FROM golang:1.22-bookworm AS build-env
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-WORKDIR /usr/src/forest
+# install dependencies
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y build-essential clang-14 curl git ca-certificates
+RUN update-ca-certificates
+ENV CC=clang-14 CXX=clang++-14
+
+# install Rust
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --no-modify-path --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /forest
 COPY . .
 
-# Install protoc
-ENV PROTOC_ZIP protoc-3.7.1-linux-x86_64.zip
-RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v3.7.1/$PROTOC_ZIP
-RUN unzip -o $PROTOC_ZIP -d /usr/local bin/protoc
-RUN unzip -o $PROTOC_ZIP -d /usr/local 'include/*'
-RUN rm -f $PROTOC_ZIP
+# Install Forest. Move it out of the cache for the prod image.
+RUN --mount=type=cache,sharing=private,target=/root/.cargo/registry \
+    --mount=type=cache,sharing=private,target=/root/.rustup \
+    --mount=type=cache,sharing=private,target=/forest/target \
+    make install && \
+    mkdir /forest_out && \
+    cp /root/.cargo/bin/forest* /forest_out
 
-# Extra dependencies needed for rust-fil-proofs
-RUN apt-get update && \
-    apt-get install --no-install-recommends -y curl file gcc g++ hwloc libhwloc-dev git make openssh-client \
-    ca-certificates autoconf automake cmake libtool libcurl4 libcurl4-openssl-dev libssl-dev \
-    libelf-dev libdw-dev binutils-dev zlib1g-dev libiberty-dev wget \
-    xz-utils pkg-config python clang ocl-icd-opencl-dev
-
-RUN cargo install --path forest
-
+##
 # Prod image for forest binary
-FROM debian:buster-slim
+# Use github action runner cached images to avoid being rate limited
+# https://github.com/actions/runner-images/blob/main/images/linux/Ubuntu2004-Readme.md#cached-docker-images
+##
+# A slim image contains only forest binaries
+FROM ubuntu:24.04 AS slim-image
 
+ENV DEBIAN_FRONTEND="noninteractive"
 # Install binary dependencies
 RUN apt-get update && \
-    apt-get install --no-install-recommends -y curl file gcc g++ hwloc libhwloc-dev make openssh-client \
-    autoconf automake cmake libtool libcurl4 libcurl4-openssl-dev libssl-dev \
-    libelf-dev libdw-dev binutils-dev zlib1g-dev libiberty-dev wget \
-    xz-utils pkg-config python clang ocl-icd-opencl-dev ca-certificates
+    apt-get install --no-install-recommends -y ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+RUN update-ca-certificates
 
-# Copy over binaries from the build-env
-COPY --from=build-env /usr/local/cargo/bin/forest /usr/local/bin/forest
+# Copy forest daemon and cli binaries from the build-env
+COPY --from=build-env /forest_out/* /usr/local/bin/
 
-CMD ["forest"]
+# Basic verification of dynamically linked dependencies
+RUN forest -V && forest-cli -V && forest-tool -V && forest-wallet -V
+
+ENTRYPOINT ["forest"]
+
+# A fat image contains forest binaries and fil proof parameter files under $FIL_PROOFS_PARAMETER_CACHE
+FROM slim-image AS fat-image
+
+# Move FIL_PROOFS_PARAMETER_CACHE out of forest data dir since users always need to mount the data dir
+ENV FIL_PROOFS_PARAMETER_CACHE="/var/tmp/filecoin-proof-parameters"
+
+# Populate $FIL_PROOFS_PARAMETER_CACHE
+RUN forest-tool fetch-params --keys
+
+# Cache actor bundle in the image
+ENV FOREST_ACTOR_BUNDLE_PATH="/var/tmp/forest_actor_bundle.car.zst"
+
+# Populate $FOREST_ACTOR_BUNDLE_PATH
+RUN forest-tool state-migration actor-bundle $FOREST_ACTOR_BUNDLE_PATH
+
+ENTRYPOINT ["forest"]

@@ -1,4 +1,2 @@
-# CODEOWNERS: https://help.github.com/articles/about-codeowners/
-
-# Primary repo maintainers
-*       @ec2 @noot @olibearo @connormullett @elmattic
+# Two members of the Forest team are automatically (and randomly) assigned to review all PRs.
+*	@ChainSafe/Forest
